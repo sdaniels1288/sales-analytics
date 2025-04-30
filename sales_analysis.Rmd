@@ -1,0 +1,211 @@
+---
+title: "Sales Analysis Project"
+author: Stephan Daniels (https://github.com/sdaniels1288)
+output: html_document
+---
+
+```{r}
+# Quietly import relevant libraries
+suppressMessages(suppressWarnings(library(tidyverse)))
+suppressMessages(suppressWarnings(library(scales)))
+
+# Quietly read in data
+suppressMessages(suppressWarnings(product_sales <- read_csv('product_sales.csv')))
+```
+
+**To:** Head of Analytics\
+**From:** Stephan Daniels\
+**Subject**: Re: New task from the sales team\
+**Date**: April 22, 2025
+
+Thanks for tapping me for this project! I'm definitely willing and able to help out the sales team with anything they need. I've reviewed the data, and you'll find my report below.
+
+Thanks!
+
+Steve Daniels
+
+\
+
+# Business Problem
+
+Following the launch of a new line of office stationery, Pens and Printers tested three sales strategies: targeted emails, targeted phone calls, and a combination of the two.
+
+- **Email:** Customers in this group received an email when the product line was launched, and a further email three weeks later. This required very little work for the team.
+
+- **Call:**  Customers in this group were called by a member of the sales team. On average members of the team were on the phone for around thirty minutes per customer.
+
+- **Email and Call:** Customers in this group were first sent the product information email, then called a week later by the sales team to talk about their needs and how this new product may support their work. The email required little work from the team, and the call lasted around ten minutes per customer.
+
+The sales team has requested information on the following questions:
+
+- How many customers were there for each approach?
+- What does the spread of the revenue look like overall? And for each method?
+- Was there any difference in revenue over time for each of the methods?
+- Based on the data, which method would you recommend we continue to use?
+
+Specifically regarding the final question, they pointed out the difference in time required for each method and asked us to take that into consideration when making our recommendations.
+
+# Executive Summary
+
+This report analyzes sales data from a new product launch to compare the effectiveness of three marketing strategies.
+
+Our findings reveal that the **email-only campaign** reached the most customers, accounting for **51% of total number of sales, as well as total revenue.** However, the **email-and-call strategy** proved more lucrative per customer, generating **\$184 per customer vs. \$97 per customer for email only.**
+
+Revenue trends over time indicate that **email-only sales declined sharply** within six weeks, whereas **email-and-call revenues steadily increased**, culminating in the highest revenue per week by the campaign's end.
+
+Given these trends, **a combined approach** leveraging both strategies would optimize total revenue. If resources are limited, we must prioritize our objectives based on strategic goals: **email-only marketing for quick revenue, email-and-call marketing for higher revenue per customer and long-term growth.**
+
+
+# Data Validation
+
+The dataset from the sales team consists of a comma-separated values (CSV) file containing 15,000 observations across 8 variables. Each observation represants an individual sale to a customer, and contains information on when the sale took place, the number of items sold, the marketing method used to reach the customer, and the revenue obtained from the sale among other things. In order to utilize the data provided from the sales team, I examined each of the variables for data quality.
+
+Of particular note, I immediately noticed two big problems with data quality on my initial perusal of the data. First, that there were 1,074 rows in which revenue was missing. Second, there were several instances where the sales method variable fell victim to data entry errors. In order to ensure good analysis moving forward, I decided to immediately address these concern.
+
+In order to deal with the incorrect sales method entries, I simply updated the incorrectly formatted entries ('em + call', and 'email') to their correct and respective categories ('Email + Call' and 'Email').
+
+```{r}
+# Clean sales_method
+product_sales <- product_sales %>% 
+	mutate(sales_method = as.factor(case_when(
+		sales_method == "em + call" ~ "Email + Call",
+		sales_method == "email" ~ "Email",
+		.default = sales_method
+		)))
+```
+
+Following this easy fix, I sought to deal with the more complicated matter of the missing revenue data. My immediate thought was that I could impute the values for revenue per customer based on the number of items sold using a regression model. Based on this rationale, I looked into the relationship between number of items sold and revenue given the existing data to see if there was a strong correlation. On inital examination, I noted a pattern of three separate linear correlations, which I deduced to be differences in sales method.
+
+```{r}
+# Visualize revenue by number sold and sales method - able to use linear model to impute missing values
+ggplot(drop_na(product_sales), aes(nb_sold, revenue, color = sales_method)) +
+	geom_point() + geom_smooth(method = 'glm', formula = y ~ x, na.rm = TRUE) +
+	theme_minimal() +
+	scale_y_continuous(label = comma) +
+	labs(x = 'Number of Items Sold Per Customer', 
+		 y = 'Revenue Per Customer',
+		 color = 'Sales Method')
+```
+
+Knowing this, I felt comfortable in my decision to proceed with imputing the revenue data based on number of items sold and sales method. I generated a multiple linear regression model utilizing these variables, and found it to have a very high adjusted R-squared value ($R^2 = 0.98$). This indicates that the model accounts for 98% of the variation in revenue per customer. Utilizing this model, I predicted the values for revenue and replaced the null values with the predicted ones. Apart from these two data issues, no further data issues were found on examination of the rest of the relevant variables.
+
+```{r}
+# Create linear model to impute revenue based on number sold and sales method
+glm <- lm(revenue ~ nb_sold + sales_method, data = product_sales)
+product_sales <- product_sales %>%
+	mutate(predicted_revenue = round(predict(glm, product_sales), 2))
+
+# Replace missing values with imputed values
+product_sales <- product_sales %>%
+	mutate(revenue = ifelse(is.na(revenue), predicted_revenue, revenue))
+product_sales <- product_sales %>% select(-predicted_revenue)
+```
+
+# Customer and Revenue Distributions
+
+After grouping and summarizing the customers in the data, we can see that half of the sales came from the email only campaign. This is likely due to the fact that email campaigns can be sent out *en masse* with very little effort, as noted above. Because of this time factor, the reach within the target market is much greater than the other sales methods. Of note, however, is the comparison between the proportion of customers versus the proportion of total revenue which they generated. The email only customers make up approximately 51% of total revenue, which is as expected based on their large proporton as a whole. On the other hand, email & call customers, while only accounting for 17% of the total number of customer sales, made up a third of the total revenue, with the call only customers covering the final 16% of total revenue.
+
+```{r}
+overall_revenue <- sum(product_sales$revenue)
+product_sales %>%
+	group_by('Sales Method' = sales_method) %>%
+	summarize('Count of Customers' = comma(n()),
+			  '% of Total Customers' = percent(round(n()/nrow(product_sales), 2)),
+			  'Total Revenue' = comma(round(sum(revenue),0)),
+			  '% of Total Revenue' = percent(sum(revenue)/overall_revenue))
+```
+
+In addition to the aggregate numbers of customers, it's interesting to note the distribution of customers per week as grouped by sales method. We can see that over the course of the campaign, email customers started out very high, with about 3,000 customer sales generated in the first week. However, the reach per week for emails dropped sharply over the following 5 weeks. This is likely due to the fact that once the emails went out, customers who were likely to be persuaded to buy did so quickly. We see a slight bulge out in the line immediately following week 3 when the follow up email went out, as interest was renewed in the campaign. The other two sales methods retained roughly steady customers per week throughout the campaign.
+
+```{r}
+suppressMessages(product_sales %>%
+	group_by(week, sales_method) %>%
+	summarize(total_customers = n()) %>%
+	arrange(week) %>%
+	ggplot(aes(week, total_customers, color = sales_method)) +
+		geom_line() + geom_point() +
+		theme_minimal() +
+		scale_y_continuous(label = comma) +
+		labs(x = 'Weeks since Launch', y = 'Customers Per Week', color = 'Sales Method'))
+```
+
+We can see that the overall distribution of revenue per customer is multimodal, with three peaks corresponding to the mean values for each sales method. This is especially apparent when we color the histogram based on sales method. Overall the distribution of revenues per customer ranges from \$238.32 to \$25.71, with an average revenue of \$95.69 and a standard deviation of \$48.18. While the overal distribution of revenue is not normal, the distributions within each factor of sales method are roughly normal. Given this, if we can satisfy roughly equal variances, we can use ANOVA to verify the appearance of different means between the groups.
+
+```{r}
+product_sales %>%
+	summarize(
+		'Range' = paste('$', format(round(max(revenue) - min(revenue), 2), nsmall = 2)),
+		'Minimum' = paste('$', format(round(min(revenue), 2), nsmall = 2)),
+		'Maximum' = paste('$', format(round(max(revenue), 2), nsmall = 2)),
+		'Mean' = paste('$', format(round(mean(revenue),2), nsmall = 2)),
+		'Standard Deviation' = paste('$', format(round(sd(revenue),2), nsmall = 2))
+	)
+```
+
+```{r}
+ggplot(product_sales, aes(x = revenue)) + 
+	geom_histogram(bins = 10) + 
+	theme_minimal() +
+	theme(
+		axis.title.y = element_blank(),
+		axis.text.y = element_blank(),
+		axis.ticks.y = element_blank()
+	) +
+	labs(x='Revenue per Customer')
+```
+
+```{r}
+ggplot(product_sales, aes(x = revenue, fill = sales_method)) + 
+	geom_histogram(bins = 10) + 
+	theme_minimal() +
+	theme(
+		axis.title.y = element_blank(),
+		axis.text.y = element_blank(),
+		axis.ticks.y = element_blank(),
+	) +
+	labs(x='Revenue per Customer', fill = 'Sales Method')
+```
+
+# Comparison of Sales Methods
+
+We can see that there appears to be a clear difference between the average amount of revenue per customer in aggregate across the entire campaign. Based on this information, it would appear that email and call performed best on this metric with an average revenue per customer of \$183.99. Email marketing alone came in second with an average revenue per customer of \$97.18. Finally, we saw that calls only averaged only \$47.67 of revenue per customer. The question though, can we confirm that this difference is statistically significant, and not simply a matter of chance? In order to do this, we can use Analysis of Variance (ANOVA) to compare the means of each group and test this hypothesis. In this case the null, or default, assumption we're making about the data is that there is no difference between the mean values of revenue by group. We'll use a commonly accepted standard confidence level of 95% for these tests ($\alpha = 0.05$). If the p-value we obtain from the test is lower than this alpha level, we can state that there is sufficient evidence to reject this null hypothesis and conclude that there is a difference in at least two means. Crucially, ANOVA does not tell us _which_ categories differ, or to what magnitude, only that a difference exists. We can however use _post-hoc_ testing to compare the values and uncover this information. 
+
+```{r}
+product_sales %>%
+	group_by('Sales Method' = sales_method) %>%
+	summarize('Revenue per Customer Mean' = paste('$', round(mean(revenue),2)), 'Revenue per Customer Standard Deviation' = paste('$', round(sd(revenue),2)))
+```
+
+ANOVA has several assumptions that should be met before use. The first two are robust enough with large sample sizes that if we don't fully and completely meet them, we will still get good results. The first has alread been confirmed, and that is that each group examined (the sales methods) should have a roughly normal distribution of the response variable (revenue in this case). We can see this from this histogram above. The second assumption that must be met is that the groups have equal variance. This is a little trickier with this data, as when we compare the highest and lowest standard deviations between the groups, we see a ratio of about 3:1. This is on the high end for what is accepted as "equal variance", but again, given that we have a quite large sample size, the test should still be robust.
+
+```{r}
+aov <- aov(revenue ~ sales_method, data = product_sales)
+print(summary(aov))
+print(TukeyHSD(aov))
+```
+
+After running the ANOVA test, we can see that there is definitely a difference between the mean revenue per customer by sales method, as we assumed from the histogram. The very low p-value (approximately $p = 0$) indicates a very strong probability that this difference exists. Additionally, we can see from the _post-hoc_ Tukey test, that there is a significant differnce between each of the groups. On average, email and call generated \$86.81 more revenue per customer than emails alone, and \$136.32 more revenue per customer than calls alone. Additionally, we can see that emails alone. generated \$49.51 more revenue per customer than calls alone. Given this information, the evidence is growing that email and call is the most beneficial sales method.
+
+## Comparison of Methods over Time
+
+When examining a line graph of total revenue over time, we can see that there was an initial spike in revenue in the initial weeks of the campaign for email only customers. As time went on, however, the revenue per week for email only dropped significantly from about \$250,000 in the first week, to just \$25,000 by week 6. This is likely due to the fact that email only marketing is extremely easy to set up and send out _en masse_. This results in quick revenue, but the downside is that the market is quickly saturated and sales drop.
+
+On the other hand, we can see that email and call generated increasing growth over the initial weeks of the campaign, rising from just \$25,000 in week 1, to a peak of \$150,000 of total revenue per week. This trend is likely due to the email campaign's ability to generate quick interest and initially expose customers to the products, followed by a call from a sales reprentative to really cement the value to the customer and close the sale. While the overall revenue generated is less than the email only campaign, the email and call method generates higher revenues per customer. Calls alone remained roughly steady across the campaign, generating about \$25,000 to \$50,000 in revenue per week.
+
+```{r}
+suppressMessages(product_sales %>%
+	group_by(week, sales_method) %>%
+	summarize(total_revenue = sum(revenue)) %>%
+	ggplot(aes(week, total_revenue, color = sales_method)) + 
+	geom_line() + geom_point() + 
+	theme_minimal() + 
+	scale_y_continuous(label=comma) +
+	labs(x = 'Weeks since launch', y = 'Total revenue generated (USD)', color = 'Sales Method', title = 'Total Revenue Generated by Week'))
+```
+
+# Recommendations
+
+Given the information we have and depending on resources available, my recommendations are as follows:
+
+1. If resources are available, we should use a combination of email only marketing and email and call marketing. This would allow for the initally quick sales given by the easy outreach of the email campaigns, as well as leveraging our Sales team's ability to close sales later in the campaign, effectively combining the area under each curve to optimize total revenue generated over time.
+2. If we only have resources available to persue one strategy, I would recommend the email only marketing strategy. Despite the fact that email and call generated more revenue per customer, the simple fact is that a larger target market can be reached with the _en masse_ email campaign. As we saw in the data, about 50% of the total revenue came from email marketing, and it takes very little effort from the Sales team.
